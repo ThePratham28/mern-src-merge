@@ -1,8 +1,8 @@
 {
-  "name": "mern-src-merge",
+  "name": "code-merge",
   "version": "1.0.0",
   "type": "module",
   "bin": {
-    "mern-src-merge": "./merge-src-files.mjs"
+    "code-merge": "./code-merge.mjs"
   }
 }
