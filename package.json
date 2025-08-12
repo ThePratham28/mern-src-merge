@@ -1,12 +1,8 @@
 {
-  "name": "code-merge",
+  "name": "mern-src-merge",
   "version": "1.0.0",
-  "description": "Merge all files in src folder into AI-friendly chunks with syntax highlighting and zipping",
   "type": "module",
   "bin": {
-    "code-merge": "./code-merge.mjs"
-  },
-  "engines": {
-    "node": ">=18"
+    "mern-src-merge": "./merge-src-files.mjs"
   }
 }
