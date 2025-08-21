@@ -1,33 +1,100 @@
 #!/usr/bin/env node
 import fs from "fs";
 import path from "path";
+import inquirer from "inquirer";
 
-// CLI argument: project folder (defaults to current working dir)
-const projectPath = process.argv[2] || process.cwd();
-const srcPath = path.join(projectPath, "src");
+const projectPath = process.cwd();
 const outputDir = path.join(projectPath, "ai-merged");
-const maxFileSize = 900_000; // ~900 KB for AI-friendly context limits
+const maxFileSize = 900_000;
 
-// Folders & files to ignore
-const ignoreDirs = ["node_modules", "dist", "build", ".git", ".next", "out", "ai-merged"]; // Also ignore the output directory itself
+const ignoreDirs = ["node_modules", "dist", "build", ".git", ".next", "out", "ai-merged"];
 const ignoreFiles = [".env", ".DS_Store", "package-lock.json", "yarn.lock"];
 
 /**
- * Recursively walks a directory and calls a callback for each file.
- * @param {string} dir - The directory to walk.
- * @param {function(string): void} callback - The callback to execute for each file path.
+ * List directory entries with navigation options
+ */
+function listEntries(baseDir) {
+  const entries = fs.readdirSync(baseDir, { withFileTypes: true })
+    .filter((e) => !ignoreDirs.includes(e.name) && !ignoreFiles.includes(e.name))
+    .map((e) => ({
+      name: e.isDirectory() ? `📁 ${e.name}` : `📄 ${e.name}`,
+      value: { path: path.join(baseDir, e.name), isDir: e.isDirectory() },
+    }));
+
+  return [
+    ...(baseDir !== projectPath ? [{ name: "⬅️  Go back", value: { back: true } }] : []),
+    ...entries,
+    new inquirer.Separator(),
+    { name: "✅ Done (finish selection)", value: { done: true } },
+  ];
+}
+
+/**
+ * Interactive file/folder selection
+ */
+async function pickFiles() {
+  let cwd = projectPath;
+  let selected = [];
+
+  while (true) {
+    const choices = listEntries(cwd);
+
+    const { choice } = await inquirer.prompt([
+      {
+        type: "list",
+        name: "choice",
+        message: `📂 ${path.relative(projectPath, cwd) || "."} — Select:`,
+        choices,
+      },
+    ]);
+
+    if (choice.done) break;
+    if (choice.back) {
+      cwd = path.dirname(cwd);
+      continue;
+    }
+
+    if (choice.isDir) {
+      // Ask if user wants to enter or select whole folder
+      const { action } = await inquirer.prompt([
+        {
+          type: "list",
+          name: "action",
+          message: `Folder "${path.basename(choice.path)}" — what to do?`,
+          choices: [
+            { name: "📂 Enter folder", value: "enter" },
+            { name: "📌 Select this folder", value: "select" },
+            { name: "❌ Cancel", value: "cancel" },
+          ],
+        },
+      ]);
+
+      if (action === "enter") {
+        cwd = choice.path;
+      } else if (action === "select") {
+        selected.push(choice.path);
+        console.log(`✅ Added folder: ${choice.path}`);
+      }
+    } else {
+      selected.push(choice.path);
+      console.log(`✅ Added file: ${choice.path}`);
+    }
+  }
+
+  return selected;
+}
+
+/**
+ * Recursively collect files
  */
 function walkDir(dir, callback) {
   fs.readdirSync(dir, { withFileTypes: true }).forEach((entry) => {
     const entryPath = path.join(dir, entry.name);
-
     if (entry.isDirectory()) {
-      // If it's a directory, check if it should be ignored
       if (!ignoreDirs.includes(entry.name)) {
         walkDir(entryPath, callback);
       }
     } else {
-      // If it's a file, check if it should be ignored
       if (!ignoreFiles.includes(entry.name)) {
         callback(entryPath);
       }
@@ -36,60 +103,54 @@ function walkDir(dir, callback) {
 }
 
 /**
- * Merges files from a specified directory into one or more text files.
+ * Merge files into output
  */
-function mergeFiles() {
-  let scanPath = "";
-
-  // Determine which directory to scan
-  if (fs.existsSync(srcPath) && fs.lstatSync(srcPath).isDirectory()) {
-    console.log(`✅ Found 'src' folder. Merging files from: ${srcPath}`);
-    scanPath = srcPath;
-  } else {
-    console.log(`ℹ️ No 'src' folder found. Merging files from the current project folder: ${projectPath}`);
-    scanPath = projectPath;
+async function mergeFiles() {
+  const selectedPaths = await pickFiles();
+  if (!selectedPaths.length) {
+    console.log("No files/folders selected. Exiting.");
+    return;
   }
 
   let mergedContent = "";
 
-  // Walk the selected directory and merge file contents
-  walkDir(scanPath, (filePath) => {
-    // Ensure we don't process files inside the output directory if scanning the root
-    if (filePath.startsWith(outputDir)) {
-      return;
+  for (const item of selectedPaths) {
+    const stat = fs.lstatSync(item);
+    if (stat.isDirectory()) {
+      walkDir(item, (filePath) => {
+        const relativePath = path.relative(projectPath, filePath);
+        try {
+          const content = fs.readFileSync(filePath, "utf8");
+          mergedContent += `\n\n--- FILE: ${relativePath} ---\n${content}\n`;
+        } catch (err) {
+          console.warn(`⚠️ Could not read ${filePath}: ${err.message}`);
+        }
+      });
+    } else {
+      const relativePath = path.relative(projectPath, item);
+      try {
+        const content = fs.readFileSync(item, "utf8");
+        mergedContent += `\n\n--- FILE: ${relativePath} ---\n${content}\n`;
+      } catch (err) {
+        console.warn(`⚠️ Could not read ${item}: ${err.message}`);
+      }
     }
-    const relativePath = path.relative(projectPath, filePath);
-    try {
-      const content = fs.readFileSync(filePath, "utf8");
-      mergedContent += `\n\n--- FILE: ${relativePath} ---\n${content}\n`;
-    } catch (error) {
-      console.warn(`⚠️ Could not read file: ${filePath}. Skipping. Error: ${error.message}`);
-    }
-  });
+  }
 
-  if (mergedContent.trim() === "") {
-    console.log("No files to merge.");
+  if (!mergedContent.trim()) {
+    console.log("No file contents to merge.");
     return;
   }
-  
-  // Create the output directory if it doesn't exist
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir);
-  }
 
-  // Split the merged content into multiple files if it's too large
+  if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir);
+
   let part = 1;
   while (mergedContent.length > 0) {
     const chunk = mergedContent.slice(0, maxFileSize);
     mergedContent = mergedContent.slice(maxFileSize);
     const outFile = path.join(outputDir, `merged-part-${part}.txt`);
-    
-    try {
-      fs.writeFileSync(outFile, chunk, "utf8");
-      console.log(`✅ Created: ${outFile}`);
-    } catch (error) {
-        console.error(`❌ Failed to write file: ${outFile}. Error: ${error.message}`);
-    }
+    fs.writeFileSync(outFile, chunk, "utf8");
+    console.log(`✅ Created: ${outFile}`);
     part++;
   }
 }
