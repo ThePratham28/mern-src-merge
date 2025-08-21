@@ -5,12 +5,12 @@ Merge all files in `src` into a single AI-friendly text, split into safe chunks,
 ## Install & Run (One Command)
 
 ```bash
-npx github:<your-username>/ai-pack
+npx github:<your-username>/code-merge
 ```
 or run on a specific project:
 
 ```bash
-npx github:<your-username>/ai-pack C:\path\to\project
+npx github:<your-username>/code-merge C:\path\to\project
 ```
 
 ## Features
