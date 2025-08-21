@@ -4,5 +4,8 @@
   "type": "module",
   "bin": {
     "code-merge": "./code-merge.mjs"
+  },
+  "dependencies": {
+    "inquirer": "^9.2.17"
   }
 }
